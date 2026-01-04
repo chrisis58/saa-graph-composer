@@ -9,7 +9,7 @@ import java.lang.annotation.Target;
 
 /**
  * Mark a field as a node in the graph.
- * Support filed types are:
+ * Support field types are:
  * <ul>
  *     <li>{@link com.alibaba.cloud.ai.graph.action.NodeAction}</li>
  *     <li>{@link com.alibaba.cloud.ai.graph.action.NodeActionWithConfig}</li>

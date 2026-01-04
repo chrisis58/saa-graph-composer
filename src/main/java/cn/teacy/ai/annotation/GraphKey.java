@@ -10,21 +10,15 @@ import java.lang.annotation.Target;
 
 
 /**
- * Mark a filed as a graph key.
+ * Mark a field as a graph key.
+ * Support field type:
+ * <ul>
+ *     <li>{@link java.lang.String}</li>
+ * </ul>
  */
 @Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface GraphKey {
-
-    /**
-     * The identifier for the graph key. It will determine in this order:
-     * <ul>
-     *     <li>value of the annotation</li>
-     *     <li>static value</li>
-     *     <li>field name</li>
-     * </ul>
-     */
-    String value() default "";
 
     /**
      * The strategy to handle the key when there is a conflict.

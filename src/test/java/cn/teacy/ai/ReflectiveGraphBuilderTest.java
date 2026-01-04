@@ -6,9 +6,7 @@ import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.StateGraph;
-import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
-import com.alibaba.cloud.ai.graph.action.EdgeAction;
-import com.alibaba.cloud.ai.graph.action.NodeAction;
+import com.alibaba.cloud.ai.graph.action.*;
 import com.alibaba.cloud.ai.graph.state.strategy.AppendStrategy;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +46,7 @@ class ReflectiveGraphBuilderTest {
     @GraphComposer(id = "routed_graph_composer")
     static class RoutedGraphComposer {
 
-        @GraphKey(value = "query")
+        @GraphKey
         public static final String KEY_QUERY = "query";
 
         @GraphKey
@@ -204,7 +202,7 @@ class ReflectiveGraphBuilderTest {
         private static final String KEY_RESULT = "result";
 
         @GraphNode(id = NODE_A, isStart = true, next = {NODE_B, NODE_C})
-        final NodeAction actionA = state -> Map.of();
+        final NodeActionWithConfig actionA = (state, config) -> Map.of();
 
         @GraphNode(id = NODE_B, next = StateGraph.END)
         final NodeAction actionB = state -> Map.of(KEY_RESULT, "from B");
@@ -254,6 +252,48 @@ class ReflectiveGraphBuilderTest {
         public ParentGraphComposer(CompiledGraph subGraph) {
             this.subGraph = subGraph;
         }
+
+    }
+
+    @Test
+    @DisplayName("Routing Edges with Different Action Types")
+    void buildRoutingGraph() {
+        RoutingGraphComposer composer = new RoutingGraphComposer();
+        CompiledGraph graph = builder.build(composer);
+
+        OverAllState state = graph.invoke(Map.of()).orElseThrow();
+
+        assertThat(state).isNotNull();
+    }
+
+    @GraphComposer
+    static class RoutingGraphComposer {
+
+        @ConditionalEdge(source = StateGraph.START, mappings = {"next", NODE_A})
+        final EdgeAction routingEdge1 = (state) -> "next";
+
+        @ConditionalEdge(source = NODE_A, mappings = {"next", NODE_B})
+        final AsyncEdgeAction routingEdge2 = (state) -> CompletableFuture.completedFuture("next");
+
+        @ConditionalEdge(source = NODE_B, mappings = {"next", NODE_C})
+        final CommandAction routingEdge3 = (state, config) -> new Command("next", Map.of());
+
+        @ConditionalEdge(source = NODE_C, mappings = {"next", StateGraph.END})
+        final AsyncCommandAction routingEdge4 = (state, config) ->
+                CompletableFuture.completedFuture(new Command("next", Map.of()));
+
+        private static final String NODE_A = "nodeA";
+        private static final String NODE_B = "nodeB";
+        private static final String NODE_C = "nodeC";
+
+        @GraphNode(id = NODE_A)
+        final NodeAction nodeA = state -> Map.of();
+
+        @GraphNode(id = NODE_B)
+        final NodeAction nodeB = state -> Map.of();
+
+        @GraphNode(id = NODE_C)
+        final NodeAction nodeC = state -> Map.of();
 
     }
 

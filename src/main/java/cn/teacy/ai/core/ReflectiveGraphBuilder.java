@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
+import java.lang.reflect.Modifier;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -37,7 +38,7 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
                 : clazz.getSimpleName();
 
         try {
-            Map<String, KeyStrategy> keyStrategies = scanKeys(clazz);
+            Map<String, KeyStrategy> keyStrategies = scanKeys(clazz, graphComposer);
 
             StateGraph builder = new StateGraph(graphId, () -> keyStrategies);
 
@@ -77,7 +78,7 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
         }
     }
 
-    private Map<String, KeyStrategy> scanKeys(Class<?> clazz) {
+    private Map<String, KeyStrategy> scanKeys(Class<?> clazz, Object composer) {
         Map<String, KeyStrategy> strategyMap = new HashMap<>();
 
         ReflectionUtils.doWithFields(clazz, field -> {
@@ -85,19 +86,23 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
                 ReflectionUtils.makeAccessible(field);
                 GraphKey anno = field.getAnnotation(GraphKey.class);
 
+                if (!Modifier.isFinal(field.getModifiers())) {
+                    throw new GraphDefinitionException(
+                            String.format("Field '%s' must be 'final'. Graph keys should be immutable constants.", field.getName()));
+                }
+
+                if (!Modifier.isStatic(field.getModifiers())) {
+                    throw new GraphDefinitionException(
+                            String.format("Field '%s' must be 'static'. Graph keys supposed to be global constants (e.g., public static final String).", field.getName()));
+                }
+
+                if (field.getType() != String.class) {
+                    throw new GraphDefinitionException("Field type must be String.");
+                }
+
                 try {
-                    // 1. annotation#value
-                    // 2. static field value
-                    // 3. field name
-                    String keyName = anno.value();
-                    if (!StringUtils.hasText(keyName)) {
-                        Object staticValue = field.get(null);
-                        if (staticValue instanceof String) {
-                            keyName = (String) staticValue;
-                        } else {
-                            keyName = field.getName();
-                        }
-                    }
+                    ReflectionUtils.makeAccessible(field);
+                    String keyName = (String) field.get(null);
 
                     KeyStrategy strategy = BeanUtils.instantiateClass(anno.strategy());
 
@@ -209,21 +214,23 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
 
     @NotNull
     private static AsyncCommandAction getUnifiedAction(Object fieldVal, String fieldName) {
-        if (fieldVal instanceof AsyncCommandAction) {
-            return (AsyncCommandAction) fieldVal;
+        if (fieldVal instanceof AsyncCommandAction action) {
+            return action;
         }
-        if (fieldVal instanceof AsyncEdgeAction) {
+        if (fieldVal instanceof CommandAction action) {
+            return AsyncCommandAction.node_async(action);
+        }
+        if (fieldVal instanceof AsyncEdgeAction action) {
             // wrap once
-            return AsyncCommandAction.of((AsyncEdgeAction) fieldVal);
+            return AsyncCommandAction.of(action);
         }
-        if (fieldVal instanceof EdgeAction) {
+        if (fieldVal instanceof EdgeAction action) {
             // wrap twice
-            AsyncEdgeAction asyncWrapper = AsyncEdgeAction.edge_async((EdgeAction) fieldVal);
+            AsyncEdgeAction asyncWrapper = AsyncEdgeAction.edge_async(action);
             return AsyncCommandAction.of(asyncWrapper);
         }
-
         throw new GraphDefinitionException(String.format(
-                "Field '%s' type [%s] is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, AsyncCommandAction]",
+                "Field '%s' type [%s] is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, CommandAction, AsyncCommandAction]",
                 fieldName, fieldVal.getClass().getSimpleName()));
     }
 
@@ -267,7 +274,6 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
         });
 
         return Optional.ofNullable(configRef.get()).orElseGet(() -> CompileConfig.builder().build());
-
     }
 
     private Map<String, String> parseMappings(String[] mappings, String fieldName) {

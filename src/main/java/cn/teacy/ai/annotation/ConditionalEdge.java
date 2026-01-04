@@ -8,7 +8,7 @@ import java.lang.annotation.Target;
 
 /**
  * Mark a field as a conditional edge in the graph.
- * Support filed types are:
+ * Support field types are:
  * <ul>
  *     <li>{@link com.alibaba.cloud.ai.graph.action.EdgeAction}</li>
  *     <li>{@link com.alibaba.cloud.ai.graph.action.AsyncEdgeAction}</li>

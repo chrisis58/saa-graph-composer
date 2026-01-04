@@ -1,9 +1,13 @@
 package cn.teacy.ai;
 
+import cn.teacy.ai.annotation.ConditionalEdge;
 import cn.teacy.ai.annotation.GraphComposer;
+import cn.teacy.ai.annotation.GraphKey;
 import cn.teacy.ai.annotation.GraphNode;
 import cn.teacy.ai.core.ReflectiveGraphBuilder;
 import cn.teacy.ai.exception.GraphDefinitionException;
+import com.alibaba.cloud.ai.graph.StateGraph;
+import com.alibaba.cloud.ai.graph.action.EdgeAction;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -84,6 +88,81 @@ class ReflectiveGraphBuilderErrorTest {
     static class NullNodeComposer {
         @GraphNode(id = "node1")
         final NodeAction nodeA = null;
+    }
+
+    @Test
+    @DisplayName("Should throw exception for non-String Graph Key")
+    void throwExceptionNonStringGraphKey() {
+        NonStringKeyComposer composer = new NonStringKeyComposer();
+        assertThatThrownBy(() -> builder.build(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("must be String");
+    }
+
+    @GraphComposer
+    static class NonStringKeyComposer {
+        @GraphKey
+        static final Object KEY_INVALID = new Object();
+    }
+
+    @Test
+    @DisplayName("Should throw exception for non-static Graph Key")
+    void throwExceptionNonStaticGraphKey() {
+        NonStaticKeyComposer composer = new NonStaticKeyComposer();
+        assertThatThrownBy(() -> builder.build(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("must be 'static'");
+    }
+
+    @GraphComposer
+    static class NonStaticKeyComposer {
+        @GraphKey
+        final String KEY_INSTANCE = "instanceKey";
+    }
+
+    @Test
+    @DisplayName("Should throw exception for non-final Graph Key")
+    void throwExceptionNonFinalGraphKey() {
+        NonFinalKeyComposer composer = new NonFinalKeyComposer();
+        assertThatThrownBy(() -> builder.build(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("must be 'final'");
+    }
+
+    @GraphComposer
+    static class NonFinalKeyComposer {
+        @GraphKey
+        static String KEY_NON_FINAL = "nonFinalKey";
+    }
+
+    @Test
+    @DisplayName("Should throw exception for null Edge Action")
+    void throwExceptionNullEdgeAction() {
+        NullRoutingComposer composer = new NullRoutingComposer();
+        assertThatThrownBy(() -> builder.build(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("is null");
+    }
+
+    @GraphComposer
+    static class NullRoutingComposer {
+        @ConditionalEdge(source = StateGraph.START, mappings = {"toEnd", StateGraph.END})
+        final EdgeAction nullRouting = null;
+    }
+
+    @Test
+    @DisplayName("Should throw exception for unsupported Edge Action type")
+    void throwExceptionUnsupportedEdgeType() {
+        UnsupportedEdgeTypeComposer composer = new UnsupportedEdgeTypeComposer();
+        assertThatThrownBy(() -> builder.build(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("is not supported. Must be one of");
+    }
+
+    @GraphComposer
+    static class UnsupportedEdgeTypeComposer {
+        @ConditionalEdge(source = StateGraph.START, mappings = {"toEnd", StateGraph.END})
+        final String invalidRouting = "I am not an EdgeAction";
     }
 
 }
