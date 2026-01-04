@@ -6,6 +6,7 @@ import cn.teacy.ai.interfaces.GraphBuildLifecycle;
 import com.alibaba.cloud.ai.graph.*;
 import com.alibaba.cloud.ai.graph.action.*;
 import com.alibaba.cloud.ai.graph.exception.GraphStateException;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
@@ -13,14 +14,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Parameter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 @Component
 public class ReflectiveGraphBuilder implements IGraphBuilder {
@@ -157,61 +155,95 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
     }
 
     private void scanConditionalEdges(Object composer, StateGraph builder, String graphId) {
-        ReflectionUtils.doWithMethods(composer.getClass(), method -> {
-            if (method.isAnnotationPresent(ConditionalEdge.class)) {
-                ReflectionUtils.makeAccessible(method);
-                ConditionalEdge anno = method.getAnnotation(ConditionalEdge.class);
+        ReflectionUtils.doWithFields(composer.getClass(), field -> {
+            if (field.isAnnotationPresent(ConditionalEdge.class)) {
+                ReflectionUtils.makeAccessible(field);
+                ConditionalEdge anno = field.getAnnotation(ConditionalEdge.class);
                 assert anno != null;
 
+                Map<String, String> routeMap = parseMappings(anno.mappings(), field.getName());
                 String sourceNodeId = anno.source();
-                Map<String, String> routeMap = parseMappings(anno.mappings(), method.getName());
-
-                AsyncCommandAction unifiedAction = (state, config) -> {
-                    try {
-                        Object[] args = prepareArguments(method, state, config);
-                        Object result = method.invoke(composer, args);
-                        return normalizeResult(result);
-                    } catch (InvocationTargetException e) {
-                        throw new RuntimeException("Error executing conditional edge: " + method.getName(), e.getTargetException());
-                    } catch (Exception e) {
-                        throw new RuntimeException("Reflection error in method: " + method.getName(), e);
-                    }
-                };
-
-                log.debug("Registering conditional edge for source '{}'", sourceNodeId);
 
                 try {
+                    Object fieldVal = field.get(composer);
+
+                    if (fieldVal == null) {
+                        throw new GraphDefinitionException(String.format(
+                                "Conditional Edge field '%s' in graph [%s] is null. " +
+                                        "Please initialize it with a lambda expression or instance.",
+                                field.getName(), graphId));
+                    }
+
+                    AsyncCommandAction unifiedAction = getUnifiedAction(fieldVal, field.getName());
+
                     builder.addConditionalEdges(sourceNodeId, unifiedAction, routeMap);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Cannot access field: " + field.getName(), e);
                 } catch (GraphStateException e) {
                     throw new GraphDefinitionException(
-                            String.format("Invalid Conditional Edge in [%s]: Method '%s' (source='%s'). Check if source node exists or mappings are valid.",
-                                    graphId, method.getName(), sourceNodeId), e);
+                            String.format("Failed to add conditional edges from node '%s' in graph '%s'. Cause: %s",
+                                    sourceNodeId, graphId, e.getMessage()), e);
                 }
+
             }
         });
+    }
+
+    @NotNull
+    private static AsyncCommandAction getUnifiedAction(Object fieldVal, String fieldName) {
+        if (fieldVal instanceof AsyncCommandAction) {
+            return (AsyncCommandAction) fieldVal;
+        }
+        if (fieldVal instanceof AsyncEdgeAction) {
+            // wrap once
+            return AsyncCommandAction.of((AsyncEdgeAction) fieldVal);
+        }
+        if (fieldVal instanceof EdgeAction) {
+            // wrap twice
+            AsyncEdgeAction asyncWrapper = AsyncEdgeAction.edge_async((EdgeAction) fieldVal);
+            return AsyncCommandAction.of(asyncWrapper);
+        }
+
+        throw new GraphDefinitionException(String.format(
+                "Field '%s' type [%s] is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, AsyncCommandAction]",
+                fieldName, fieldVal.getClass().getSimpleName()));
     }
 
     private CompileConfig scanCompileConfig(Object composer) {
 
         AtomicReference<CompileConfig> configRef = new AtomicReference<>();
 
-        ReflectionUtils.doWithMethods(composer.getClass(), method -> {
-            if (method.isAnnotationPresent(GraphCompileConfig.class)) {
+        ReflectionUtils.doWithFields(composer.getClass(), field -> {
+            if (field.isAnnotationPresent(GraphCompileConfig.class)) {
                 if (configRef.get() != null) {
-                    throw new IllegalStateException("Multiple @GraphConfig methods found in " + composer.getClass().getSimpleName());
+                    throw new IllegalStateException("Multiple @GraphCompileConfig fields found in " + composer.getClass().getSimpleName());
                 }
 
-                ReflectionUtils.makeAccessible(method);
-
-                if (!CompileConfig.class.isAssignableFrom(method.getReturnType())) {
-                    throw new IllegalStateException("@GraphConfig method must return CompileConfig");
-                }
+                ReflectionUtils.makeAccessible(field);
 
                 try {
-                    CompileConfig config = (CompileConfig) method.invoke(composer);
-                    configRef.set(config);
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to invoke @GraphConfig method", e);
+                    Object value = field.get(composer);
+
+                    if (value == null) {
+                        throw new IllegalStateException("@GraphCompileConfig field '" + field.getName() + "' must not be null.");
+                    }
+
+                    if (value instanceof CompileConfig) {
+                        configRef.set((CompileConfig) value);
+                    } else if (value instanceof Supplier) {
+                        Object suppliedValue = ((Supplier<?>) value).get();
+
+                        if (suppliedValue instanceof CompileConfig) {
+                            configRef.set((CompileConfig) suppliedValue);
+                        } else {
+                            throw new IllegalStateException("The Supplier in field '" + field.getName() + "' returned null or an invalid type.");
+                        }
+                    } else {
+                        throw new IllegalStateException("Field '" + field.getName() + "' must be of type CompileConfig or Supplier<CompileConfig>.");
+                    }
+
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to access @GraphCompileConfig field: " + field.getName(), e);
                 }
             }
         });
@@ -220,49 +252,9 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
 
     }
 
-    private Object[] prepareArguments(Method method, OverAllState state, RunnableConfig config) {
-        Parameter[] parameters = method.getParameters();
-        Object[] args = new Object[parameters.length];
-
-        for (int i = 0; i < parameters.length; i++) {
-            Class<?> type = parameters[i].getType();
-            if (OverAllState.class.isAssignableFrom(type)) {
-                args[i] = state;
-            } else if (RunnableConfig.class.isAssignableFrom(type)) {
-                args[i] = config;
-            } else {
-                args[i] = null;
-            }
-        }
-        return args;
-    }
-
-    private CompletableFuture<Command> normalizeResult(Object result) {
-        CompletableFuture<?> futureResult;
-
-        if (result instanceof CompletableFuture) {
-            futureResult = (CompletableFuture<?>) result;
-        } else {
-            futureResult = CompletableFuture.completedFuture(result);
-        }
-
-        return futureResult.thenApply(res -> {
-            if (res instanceof Command cmd) {
-                return cmd;
-            } else if (res instanceof String route) {
-                return new Command(route);
-            } else if (res == null) {
-                throw new IllegalStateException("Conditional edge returned null result.");
-            } else {
-                throw new IllegalStateException("Unsupported return type: " + res.getClass().getName() +
-                        ". Expected String or Command.");
-            }
-        });
-    }
-
-    private Map<String, String> parseMappings(String[] mappings, String methodName) {
+    private Map<String, String> parseMappings(String[] mappings, String fieldName) {
         if (mappings.length % 2 != 0) {
-            throw new IllegalArgumentException("Mappings must be pairs in method: " + methodName);
+            throw new IllegalArgumentException("Mappings must be pairs in field: " + fieldName);
         }
         Map<String, String> map = new HashMap<>();
         for (int i = 0; i < mappings.length; i += 2) {

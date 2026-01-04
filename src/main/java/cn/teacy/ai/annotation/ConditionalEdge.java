@@ -7,19 +7,18 @@ import java.lang.annotation.Target;
 
 
 /**
- * Depends on the method to determine the next edge in the graph.
+ * Determine the next edge in the graph.
  * Support method type:
  * <ul>
- * <li>(OverallState) -> String</li>
- * <li>(OverallState) -> Command</li>
- * <li>(OverallState, RunnableConfig) -> String</li>
- * <li>(OverallState, RunnableConfig) -> Command</li>
+ *     <li>com.alibaba.cloud.ai.graph.action.EdgeAction</li>
+ *     <li>com.alibaba.cloud.ai.graph.action.AsyncEdgeAction</li>
+ *     <li>com.alibaba.cloud.ai.graph.action.CommandAction</li>
  * </ul>
- * @see cn.teacy.ai.core.ReflectiveGraphBuilder#scanConditionalEdges
- * @see com.alibaba.cloud.ai.graph.action.AsyncCommandAction
+ * @see com.alibaba.cloud.ai.graph.action.EdgeAction
  * @see com.alibaba.cloud.ai.graph.action.AsyncEdgeAction
+ * @see com.alibaba.cloud.ai.graph.action.CommandAction
  */
-@Target(ElementType.METHOD)
+@Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface ConditionalEdge {
 

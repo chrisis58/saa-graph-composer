@@ -2,10 +2,12 @@ package cn.teacy.ai;
 
 import cn.teacy.ai.annotation.*;
 import cn.teacy.ai.core.ReflectiveGraphBuilder;
+import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.StateGraph;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
+import com.alibaba.cloud.ai.graph.action.EdgeAction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -52,16 +54,19 @@ class ReflectiveGraphBuilderTest {
         private static final String NODE_C = "nodeC";
 
         @ConditionalEdge(source = StateGraph.START, mappings = {"b", NODE_B, "c", NODE_C})
-        public String route(OverAllState state) {
+        final EdgeAction routingEdge = (state) -> {
             String query = state.value(KEY_QUERY).orElseThrow().toString();
             return query.contains("b") ? "b" : "c";
-        }
+        };
 
         @GraphNode(id = NODE_B, next = StateGraph.END)
         final AsyncNodeAction nodeB = state -> CompletableFuture.completedFuture(Map.of(KEY_RESULT, "b"));
 
         @GraphNode(id = NODE_C, next = StateGraph.END)
         final AsyncNodeAction nodeC = state -> CompletableFuture.completedFuture(Map.of(KEY_RESULT, "c"));
+
+        @GraphCompileConfig
+        final CompileConfig config = CompileConfig.builder().build();
 
     }
 
