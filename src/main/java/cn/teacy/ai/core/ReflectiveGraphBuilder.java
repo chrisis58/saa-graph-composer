@@ -14,10 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -44,16 +41,18 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
 
             StateGraph builder = new StateGraph(graphId, () -> keyStrategies);
 
-            Map<String, String> linearEdges = scanNodes(graphComposer, builder);
+            Map<String, List<String>> linearEdges = scanNodes(graphComposer, builder);
 
-            linearEdges.forEach((from, to) -> {
-                log.debug("Adding Edge: {} -> {}", from, to);
-                try {
-                    builder.addEdge(from, to);
-                } catch (GraphStateException e) {
-                    throw new GraphDefinitionException(
-                            String.format("Invalid Edge in [%s]: Cannot connect '%s' -> '%s'. Cause: %s",
-                                    graphId, from, to, e.getMessage()), e);
+            linearEdges.forEach((from, tos) -> {
+                for (String to : tos) {
+                    try {
+                        log.debug("Adding Edge: {} -> {}", from, to);
+                        builder.addEdge(from, to);
+                    } catch (GraphStateException e) {
+                        throw new GraphDefinitionException(
+                                String.format("Invalid Edge in [%s]: Cannot connect '%s' -> '%s'. Cause: %s",
+                                        graphId, from, to, e.getMessage()), e);
+                    }
                 }
             });
 
@@ -113,8 +112,8 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
         return strategyMap;
     }
 
-    private Map<String, String> scanNodes(Object composer, StateGraph builder) {
-        Map<String, String> edges = new HashMap<>();
+    private Map<String, List<String>> scanNodes(Object composer, StateGraph builder) {
+        Map<String, List<String>> edges = new HashMap<>();
 
         ReflectionUtils.doWithFields(composer.getClass(), field -> {
             if (field.isAnnotationPresent(GraphNode.class)) {
@@ -151,11 +150,15 @@ public class ReflectiveGraphBuilder implements IGraphBuilder {
                     }
 
                     if (anno.isStart()) {
-                        edges.put(StateGraph.START, nodeId);
+                        edges.computeIfAbsent(StateGraph.START, k -> new ArrayList<>())
+                                .add(nodeId);
                     }
 
-                    if (StringUtils.hasText(anno.next())) {
-                        edges.put(nodeId, anno.next());
+                    for (String next : anno.next()) {
+                        if (StringUtils.hasText(next)) {
+                            edges.computeIfAbsent(nodeId, k -> new ArrayList<>())
+                                    .add(next);
+                        }
                     }
 
                 } catch (IllegalAccessException e) {

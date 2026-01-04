@@ -8,7 +8,9 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.StateGraph;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.alibaba.cloud.ai.graph.action.EdgeAction;
+import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.alibaba.cloud.ai.graph.state.strategy.AppendStrategy;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -169,6 +171,46 @@ class ReflectiveGraphBuilderTest {
             Integer count = (Integer) state.value(KEY_COUNT).orElse(0);
             return count < 3 ? "loop" : "end";
         };
+
+        @GraphCompileConfig
+        final CompileConfig config = CompileConfig.builder().build();
+    }
+
+    @DisplayName("Parallel Nodes (A -> [B,C] -> End) with Append Strategy")
+    @Test
+    void buildParallelGraph() {
+        ParallelGraphComposer composer = new ParallelGraphComposer();
+        CompiledGraph graph = builder.build(composer);
+
+        OverAllState state = graph.invoke(Map.of()).orElseThrow();
+
+        Object resultObj = state.value(ParallelGraphComposer.KEY_RESULT).orElse(null);
+        assertThat(resultObj).isInstanceOf(List.class);
+        List<?> results = (List<?>) resultObj;
+        assertThat(results)
+                .asInstanceOf(InstanceOfAssertFactories.list(String.class))
+                .hasSize(2)
+                .containsExactlyInAnyOrder("from B", "from C");
+    }
+
+    @GraphComposer
+    static class ParallelGraphComposer {
+
+        private static final String NODE_A = "nodeA";
+        private static final String NODE_B = "nodeB";
+        private static final String NODE_C = "nodeC";
+
+        @GraphKey(strategy = AppendStrategy.class)
+        private static final String KEY_RESULT = "result";
+
+        @GraphNode(id = NODE_A, isStart = true, next = {NODE_B, NODE_C})
+        final NodeAction actionA = state -> Map.of();
+
+        @GraphNode(id = NODE_B, next = StateGraph.END)
+        final NodeAction actionB = state -> Map.of(KEY_RESULT, "from B");
+
+        @GraphNode(id = NODE_C, next = StateGraph.END)
+        final NodeAction actionC = state -> Map.of(KEY_RESULT, "from C");
 
         @GraphCompileConfig
         final CompileConfig config = CompileConfig.builder().build();
