@@ -1,0 +1,30 @@
+{
+  "name": "saa-graph-composer",
+  "version": "1.0.0",
+  "description": "Spring AI Alibaba Graph 的声明式编排扩展",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chrisis58/saa-graph-composer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/chrisis58/saa-graph-composer/issues"
+  },
+  "homepage": "https://github.com/chrisis58/saa-graph-composer#readme",
+  "devDependencies": {
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.26"
+  }
+}
