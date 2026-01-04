@@ -7,7 +7,17 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Component
+/**
+ * Mark a field as a node in the graph.
+ * Support filed types are:
+ * <ul>
+ *     <li>{@link com.alibaba.cloud.ai.graph.action.NodeAction}</li>
+ *     <li>{@link com.alibaba.cloud.ai.graph.action.NodeActionWithConfig}</li>
+ *     <li>{@link com.alibaba.cloud.ai.graph.action.AsyncNodeAction}</li>
+ *     <li>{@link com.alibaba.cloud.ai.graph.action.AsyncNodeActionWithConfig}</li>
+ *     <li>{@link com.alibaba.cloud.ai.graph.CompiledGraph}</li>
+ * </ul>
+ */
 @Target({ElementType.FIELD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface GraphNode {

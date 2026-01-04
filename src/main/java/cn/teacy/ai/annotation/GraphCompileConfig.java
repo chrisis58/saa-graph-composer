@@ -5,6 +5,15 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+/**
+ * Mark a field as the supplier of Graph Compile Config.
+ * Support field types are:
+ * <ul>
+ *     <li>{@link com.alibaba.cloud.ai.graph.CompileConfig}</li>
+ *     <li>{@link java.util.function.Supplier<com.alibaba.cloud.ai.graph.CompileConfig>}</li>
+ *     <li>{@link cn.teacy.ai.interfaces.CompileConfigSupplier}</li>
+ * </ul>
+ */
 @Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface GraphCompileConfig {
