@@ -1,5 +1,8 @@
 jdk:
   - openjdk17
 
+before_install:
+  - chmod +x mvnw
+
 install:
-  - mvn clean install -Drevision=$(git describe --tags --abbrev=0) -DskipTests
+  - ./mvnw clean install -Drevision=$(git describe --tags --abbrev=0) -DskipTests
