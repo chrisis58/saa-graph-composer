@@ -1,84 +1,113 @@
 package cn.teacy.ai.core;
 
+import cn.teacy.ai.annotation.EnableGraphComposer;
 import cn.teacy.ai.annotation.GraphComposer;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import jakarta.annotation.Nonnull;
-import org.slf4j.Logger;
-import org.springframework.beans.BeansException;
-import org.springframework.beans.factory.SmartInitializingSingleton;
-import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.context.ApplicationContext;
-import org.springframework.context.ApplicationContextAware;
-import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.AnnotatedBeanDefinition;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.beans.factory.support.BeanDefinitionBuilder;
+import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.beans.factory.support.BeanNameGenerator;
+import org.springframework.context.ResourceLoaderAware;
+import org.springframework.context.annotation.AnnotationBeanNameGenerator;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
+import org.springframework.core.annotation.AnnotationAttributes;
+import org.springframework.core.io.ResourceLoader;
+import org.springframework.core.type.AnnotationMetadata;
+import org.springframework.core.type.filter.AnnotationTypeFilter;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.StringUtils;
 
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
-@Component
-public class GraphAutoRegistrar implements SmartInitializingSingleton, ApplicationContextAware {
+import static cn.teacy.ai.constants.ComposerConfigConstants.GRAPH_BUILDER_BEAN_NAME;
 
-    private static final Logger log = org.slf4j.LoggerFactory.getLogger(GraphAutoRegistrar.class);
+public class GraphAutoRegistrar implements ImportBeanDefinitionRegistrar, ResourceLoaderAware {
 
-    private ApplicationContext applicationContext;
-    private final IGraphBuilder graphBuilder;
+    private final BeanNameGenerator beanNameGenerator = AnnotationBeanNameGenerator.INSTANCE;
 
-    public GraphAutoRegistrar(IGraphBuilder graphBuilder) {
-        this.graphBuilder = graphBuilder;
+    private ResourceLoader resourceLoader;
+
+    @Override
+    public void setResourceLoader(@Nonnull ResourceLoader resourceLoader) {
+        this.resourceLoader = resourceLoader;
     }
 
     @Override
-    public void setApplicationContext(@Nonnull ApplicationContext applicationContext) throws BeansException {
-        this.applicationContext = applicationContext;
-    }
+    public void registerBeanDefinitions(@Nonnull AnnotationMetadata importingClassMetadata, @Nonnull BeanDefinitionRegistry registry) {
+        Set<String> basePackages = getBasePackages(importingClassMetadata);
 
-    @Override
-    public void afterSingletonsInstantiated() {
-        if (!(applicationContext instanceof ConfigurableListableBeanFactory beanFactory)) {
-            log.warn("ApplicationContext is not configurable. Graph auto-registration skipped.");
-            return;
-        }
+        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
+        scanner.setResourceLoader(resourceLoader);
+        scanner.addIncludeFilter(new AnnotationTypeFilter(GraphComposer.class));
 
-        Map<String, Object> composers = applicationContext.getBeansWithAnnotation(GraphComposer.class);
+        for (String basePackage : basePackages) {
+            Set<BeanDefinition> candidateComponents = scanner.findCandidateComponents(basePackage);
 
-        for (Map.Entry<String, Object> entry : composers.entrySet()) {
-            String composerBeanName = entry.getKey();
-            Object composerBean = entry.getValue();
-
-            registerSingleGraph(beanFactory, composerBean, composerBeanName);
+            for (BeanDefinition candidate : candidateComponents) {
+                registerCompiledGraphBean(registry, candidate);
+            }
         }
     }
 
-    private void registerSingleGraph(ConfigurableListableBeanFactory beanFactory, Object composerBean, String composerBeanName) {
-        Class<?> clazz = composerBean.getClass();
-        GraphComposer anno = clazz.getAnnotation(GraphComposer.class);
+    private void registerCompiledGraphBean(BeanDefinitionRegistry registry, BeanDefinition composerBeanDefinition) {
+        String composerBeanName = beanNameGenerator.generateBeanName(composerBeanDefinition, registry);
 
-        if (!anno.autoRegister()) {
-            log.debug("Skipping auto-registration of graph composer {}", composerBeanName);
-            return;
+        if (!registry.containsBeanDefinition(composerBeanName)) {
+            registry.registerBeanDefinition(composerBeanName, composerBeanDefinition);
         }
 
-        String targetBeanName = anno.targetBeanName();
+        String targetBeanName = null;
+        if (composerBeanDefinition instanceof AnnotatedBeanDefinition annotatedDef) {
+            Map<String, Object> attributes = annotatedDef.getMetadata()
+                    .getAnnotationAttributes(GraphComposer.class.getName());
+
+            if (attributes != null) {
+                targetBeanName = (String) attributes.get("targetBeanName");
+            }
+        }
+
         if (!StringUtils.hasText(targetBeanName)) {
-            targetBeanName = composerBeanName + "Compiled";
+            if (composerBeanName.endsWith("Composer")) {
+                // "logAnalyseGraphComposer" -> "logAnalyseGraph"
+                targetBeanName = composerBeanName.substring(0, composerBeanName.length() - "Composer".length());
+            } else {
+                // "someOtherName" -> "someOtherNameCompiled"
+                targetBeanName = composerBeanName + "Compiled";
+            }
         }
 
-        if (beanFactory.containsSingleton(targetBeanName)) {
-            log.warn("Skipping Graph registration: Bean '{}' already exists. Check for naming collisions.", targetBeanName);
-            return;
+        BeanDefinitionBuilder builder = BeanDefinitionBuilder.genericBeanDefinition(CompiledGraph.class);
+        builder.setFactoryMethodOnBean("build", GRAPH_BUILDER_BEAN_NAME);
+
+        builder.addConstructorArgReference(composerBeanName);
+
+        registry.registerBeanDefinition(targetBeanName, builder.getBeanDefinition());
+    }
+
+    private Set<String> getBasePackages(AnnotationMetadata importingClassMetadata) {
+        Set<String> packages = new HashSet<>();
+
+        Map<String, Object> map = importingClassMetadata.getAnnotationAttributes(EnableGraphComposer.class.getName());
+        AnnotationAttributes attributes = AnnotationAttributes.fromMap(map);
+
+        if (attributes != null) {
+            String[] basePackages = attributes.getStringArray("basePackages");
+            for (String pkg : basePackages) {
+                if (StringUtils.hasText(pkg)) {
+                    packages.add(pkg);
+                }
+            }
         }
 
-        try {
-            log.info("Building CompiledGraph for composer: {}", composerBeanName);
-
-            CompiledGraph graph = graphBuilder.build(composerBean);
-
-            beanFactory.registerSingleton(targetBeanName, graph);
-
-            log.info("Registered CompiledGraph Bean: '{}'", targetBeanName);
-
-        } catch (Exception e) {
-            log.error("Failed to build/register graph for '{}'", composerBeanName, e);
-            throw new RuntimeException("Graph registration failed", e);
+        if (packages.isEmpty()) {
+            packages.add(ClassUtils.getPackageName(importingClassMetadata.getClassName()));
         }
+
+        return packages;
     }
 }
