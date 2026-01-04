@@ -67,4 +67,23 @@ class ReflectiveGraphBuilderErrorTest {
         @GraphNode(id = "node1")
         final NodeAction nodeB = (state) -> Map.of();
     }
+
+    @Test
+    @DisplayName("Should throw exception for null Node Action")
+    void throwExceptionNullNodeAction() {
+        NullNodeComposer composer = new NullNodeComposer();
+        assertThatThrownBy(() -> builder.build(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasCauseInstanceOf(IllegalStateException.class)
+                .satisfies(e -> {
+                    assertThat(e.getCause()).hasMessageContaining("is null");
+                });
+    }
+
+    @GraphComposer
+    static class NullNodeComposer {
+        @GraphNode(id = "node1")
+        final NodeAction nodeA = null;
+    }
+
 }
