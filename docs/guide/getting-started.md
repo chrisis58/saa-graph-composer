@@ -19,40 +19,19 @@
 ::: code-group
 
 ```xml [Maven]
-<!-- 1. 添加 JitPack 仓库 -->
-<repositories>
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-</repositories>
-
-<!-- 2. 添加依赖 -->
 <dependency>
-    <groupId>com.github.chrisis58</groupId>
+    <groupId>cn.teacy.ai</groupId>
     <artifactId>saa-graph-composer</artifactId>
-    <version>0.1.0-beta.3</version>
+    <version>0.1.0</version>
 </dependency>
 
 ```
 
 ```groovy [Gradle]
-// 1. 添加 JitPack 仓库
-repositories {
-    mavenCentral()
-    maven { url = uri("https://jitpack.io") }
-}
-
-// 2. 添加依赖
-implementation 'cn.teacy:saa-graph-composer:0.1.0-beta.3'
+implementation 'cn.teacy.ai:saa-graph-composer:0.1.0'
 
 ```
 
-:::
-
-::: tip 🚀 正式版积极开发中
-当前版本 `0.1.0-beta` 为预览版，核心功能已稳定，API 可能在正式版前有微调。
-我们计划近期发布 1.0.0 正式版，将提供更完善的向后兼容性。
 :::
 
 ## 3. 编写业务逻辑 (Service)
@@ -142,7 +121,32 @@ public class HelloWorldGraphComposer {
 虽然直接使用字符串（如 "say_hello"）也能工作，但我们强烈建议定义 static final 常量。这样做不仅能避免拼写错误，还能让 Composer 类成为一份自解释的图状态文档。 
 :::
 
-## 5. 运行与测试
+## 5. 启用配置
+
+在你的 Spring Boot 启动类或配置类上添加 `@EnableGraphComposer` 注解，以启动图扫描与自动注册功能。
+
+```java
+package com.example;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import cn.teacy.ai.annotation.EnableGraphComposer;
+
+@SpringBootApplication
+@EnableGraphComposer // 添加注解
+public class MyApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MyApplication.class, args);
+    }
+}
+
+```
+
+::: tip 🔍 扫描范围
+默认情况下，框架会扫描启动类所在的包及其子包下的 `@GraphComposer` 组件。如果你的组件定义在其他包路径下，请确保它们能被 Spring 上下文扫描到。 
+:::
+
+## 6. 运行与测试
 
 `saa-graph-composer` 会自动扫描 `@GraphComposer` 注解，并将编译好的图注册为 Spring Bean。你可以直接注入并运行它。
 
