@@ -24,13 +24,14 @@ export default defineConfig({
       {
         text: 'API 参考',
         items: [
-          { text: '注解详解', link: '/reference/annotations' },
-          { text: '配置属性', link: '/reference/configuration' }
+          { text: '全局配置', link: '/reference/configuration' },
+          { text: '图定义', link: '/reference/graph-definition' },
         ]
       },
       {
         text: '进阶用法',
         items: [
+          { text: '手动与动态编译', link: '/advanced/dynamic-compilation' },
           { text: '生命周期钩子', link: '/advanced/hooks-lifecycle' },
         ]
       }
