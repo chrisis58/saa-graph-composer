@@ -20,11 +20,7 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-          server-id: central-sonatype
-
-          server-username: MAVEN_CENTRAL_USERNAME
-          server-password: MAVEN_CENTRAL_TOKEN
+          cache: 'maven'
 
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -36,6 +32,7 @@ jobs:
       - name: Publish package
         run: >
           mvn --batch-mode deploy -P release 
+          -s .github/ci-settings.xml
           -Drevision=${{ env.PROJECT_VERSION }} 
           -Dgpg.passphrase=${{ secrets.GPG_PASSPHRASE }}
         env:

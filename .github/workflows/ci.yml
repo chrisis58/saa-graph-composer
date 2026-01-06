@@ -32,7 +32,10 @@ jobs:
           cache: maven
 
       - name: Run Tests with Maven
-        run: mvn -B clean test jacoco:report
+        run: mvn -B clean test jacoco:report -s .github/ci-settings.xml
+        env:
+          MAVEN_CENTRAL_USERNAME: anonymous
+          MAVEN_CENTRAL_TOKEN: nopass
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

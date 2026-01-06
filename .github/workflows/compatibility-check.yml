@@ -51,6 +51,11 @@ jobs:
           mvn clean test 
           -Dspring-boot.version=${{ matrix.boot }} 
           -Dspring-ai-alibaba.version=${{ matrix.saa }}
+          -s .github/ci-settings.xml
+        env:
+          MAVEN_CENTRAL_USERNAME: anonymous
+          MAVEN_CENTRAL_TOKEN: nopass
+
 
       - name: Report Result
         if: always()
