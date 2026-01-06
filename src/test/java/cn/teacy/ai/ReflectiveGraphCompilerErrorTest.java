@@ -269,12 +269,33 @@ class ReflectiveGraphCompilerErrorTest {
     }
 
     @GraphComposer
-    static class  DuplicatedConditionEdgeGraphComposer {
+    static class DuplicatedConditionEdgeGraphComposer {
         @ConditionalEdge(source = StateGraph.START, mappings = {"toEnd", StateGraph.END})
         final EdgeAction edge1 = (state) -> StateGraph.END;
 
         @ConditionalEdge(source = StateGraph.START, mappings = {"toEnd", StateGraph.END})
         final EdgeAction edge2 = (state) -> StateGraph.END;
+    }
+
+    @Test
+    @DisplayName("Should throw exception for duplicated CompileConfig definitions")
+    void throwExceptionDuplicatedCompileConfig() {
+        DuplicatedCompileConfigGraphComposer composer = new DuplicatedCompileConfigGraphComposer();
+        assertThatThrownBy(() -> builder.compile(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasCauseInstanceOf(IllegalStateException.class)
+                .satisfies(e -> {
+                    assertThat(e.getCause()).hasMessageContaining("Multiple @GraphCompileConfig fields found");
+                });
+    }
+
+    @GraphComposer
+    static class DuplicatedCompileConfigGraphComposer {
+        @GraphCompileConfig
+        final CompileConfig configA = CompileConfig.builder().build();
+
+        @GraphCompileConfig
+        final Supplier<CompileConfig> configB = () -> CompileConfig.builder().build();
     }
 
 }

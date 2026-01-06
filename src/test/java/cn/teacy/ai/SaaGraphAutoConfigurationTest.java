@@ -2,6 +2,7 @@ package cn.teacy.ai;
 
 import cn.teacy.ai.config.SaaGraphComposerAutoConfiguration;
 import cn.teacy.ai.core.GraphCompiler;
+import cn.teacy.ai.tests.another.AnotherTestGraphConfig;
 import cn.teacy.ai.tests.scoped.TestGraphConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import org.junit.jupiter.api.DisplayName;
@@ -74,6 +75,20 @@ public class SaaGraphAutoConfigurationTest {
                     assertThat(context).hasSingleBean(CompiledGraph.class);
 
                     CompiledGraph graph = context.getBean(CompiledGraph.class);
+                    assertThat(graph).isNotNull();
+
+                    assertThat(graph.invoke(Map.of()).isPresent()).isTrue();
+                });
+    }
+
+    @Test
+    void testAutoRegistrationWithComposerInAnotherPackage() {
+        runner.withUserConfiguration(AnotherTestGraphConfig.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(CompiledGraph.class);
+
+                    CompiledGraph graph = context.getBean(CompiledGraph.class);
+                    assertThat(context).hasBean("otherWorkflowCompiled");
                     assertThat(graph).isNotNull();
 
                     assertThat(graph.invoke(Map.of()).isPresent()).isTrue();
