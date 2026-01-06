@@ -42,6 +42,10 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
 
             StateGraph builder = new StateGraph(graphId, () -> keyStrategies);
 
+            if (graphComposer instanceof GraphBuildLifecycle lifecycleHook) {
+                lifecycleHook.afterKeyRegistration(builder);
+            }
+
             Map<String, List<String>> linearEdges = scanNodes(graphComposer, builder);
 
             linearEdges.forEach((from, tos) -> {
@@ -59,8 +63,8 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
 
             scanConditionalEdges(graphComposer, builder, graphId);
 
-            if (graphComposer instanceof GraphBuildLifecycle lifecycle) {
-                lifecycle.beforeCompile(builder);
+            if (graphComposer instanceof GraphBuildLifecycle lifecycleHook) {
+                lifecycleHook.beforeCompile(builder);
             }
 
             CompileConfig compileConfig = scanCompileConfig(graphComposer);
@@ -100,17 +104,16 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
                     throw new GraphDefinitionException("Field type must be String.");
                 }
 
-                try {
-                    ReflectionUtils.makeAccessible(field);
-                    String keyName = (String) field.get(null);
+                ReflectionUtils.makeAccessible(field);
+                String keyName = (String) field.get(null);
 
-                    KeyStrategy strategy = BeanUtils.instantiateClass(anno.strategy());
+                KeyStrategy strategy = BeanUtils.instantiateClass(anno.strategy());
 
-                    strategyMap.put(keyName, strategy);
-
-                } catch (Exception e) {
-                    throw new IllegalStateException("Failed to register Key from field: " + field.getName(), e);
+                if (strategyMap.containsKey(keyName)) {
+                    throw new GraphDefinitionException("Duplicate Graph Key detected: " + keyName +
+                            ". Defined in field: " + field.getName());
                 }
+                strategyMap.put(keyName, strategy);
             }
         });
 
@@ -166,8 +169,6 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
                         }
                     }
 
-                } catch (IllegalAccessException e) {
-                    throw new IllegalStateException("Cannot access node field: " + field.getName(), e);
                 } catch (GraphStateException e) {
                     throw new GraphDefinitionException(
                             String.format("Failed to add node '%s'. Cause: %s", nodeId, e.getMessage()), e);
@@ -192,16 +193,13 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
 
                     if (fieldVal == null) {
                         throw new GraphDefinitionException(String.format(
-                                "Conditional Edge field '%s' in graph [%s] is null. " +
-                                        "Please initialize it with a lambda expression or instance.",
+                                "Conditional Edge field '%s' in graph [%s] is null. Please initialize it with a lambda expression or instance.",
                                 field.getName(), graphId));
                     }
 
                     AsyncCommandAction unifiedAction = getUnifiedAction(fieldVal, field.getName());
 
                     builder.addConditionalEdges(sourceNodeId, unifiedAction, routeMap);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException("Cannot access field: " + field.getName(), e);
                 } catch (GraphStateException e) {
                     throw new GraphDefinitionException(
                             String.format("Failed to add conditional edges from node '%s' in graph '%s'. Cause: %s",
@@ -246,28 +244,24 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
 
                 ReflectionUtils.makeAccessible(field);
 
-                try {
-                    Object value = field.get(composer);
-                    if (value == null) {
-                        throw new GraphDefinitionException("@GraphCompileConfig field '" + field.getName() + "' must not be null.");
-                    }
-
-                    if (value instanceof CompileConfig) {
-                        configRef.set((CompileConfig) value);
-                    } else if (value instanceof Supplier) {
-                        Object suppliedValue = ((Supplier<?>) value).get();
-                        if (suppliedValue instanceof CompileConfig) {
-                            configRef.set((CompileConfig) suppliedValue);
-                        } else {
-                            throw new GraphDefinitionException("The Supplier in field '" + field.getName() + "' returned null or an invalid type.");
-                        }
-                    } else {
-                        throw new GraphDefinitionException("Field '" + field.getName() + "' must be of type CompileConfig or Supplier<CompileConfig>.");
-                    }
-
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException("Failed to access @GraphCompileConfig field: " + field.getName(), e);
+                Object value = field.get(composer);
+                if (value == null) {
+                    throw new GraphDefinitionException("@GraphCompileConfig field '" + field.getName() + "' must not be null.");
                 }
+
+                if (value instanceof CompileConfig) {
+                    configRef.set((CompileConfig) value);
+                } else if (value instanceof Supplier) {
+                    Object suppliedValue = ((Supplier<?>) value).get();
+                    if (suppliedValue instanceof CompileConfig) {
+                        configRef.set((CompileConfig) suppliedValue);
+                    } else {
+                        throw new GraphDefinitionException("The Supplier in field '" + field.getName() + "' returned null or an invalid type.");
+                    }
+                } else {
+                    throw new GraphDefinitionException("Field '" + field.getName() + "' must be of type CompileConfig or Supplier<CompileConfig>.");
+                }
+
             }
         });
 

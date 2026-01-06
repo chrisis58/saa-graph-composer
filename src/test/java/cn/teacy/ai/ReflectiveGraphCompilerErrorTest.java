@@ -228,4 +228,53 @@ class ReflectiveGraphCompilerErrorTest {
 
     }
 
+    @Test
+    @DisplayName("Should throw exception for duplicate Graph Keys")
+    void throwExceptionDuplicateGraphKeys() {
+        DuplicateKeyGraphComposer composer = new DuplicateKeyGraphComposer();
+        assertThatThrownBy(() -> builder.compile(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("Duplicate Graph Key");
+    }
+
+    @GraphComposer
+    static class DuplicateKeyGraphComposer {
+
+        private static final String DUPLICATE_KEY = "duplicateKey";
+
+        @GraphKey
+        private static final String KEY_1 = DUPLICATE_KEY;
+
+        @GraphKey
+        private static final String KEY_2 = DUPLICATE_KEY;
+
+    }
+
+    @GraphComposer
+    static class DuplicateNodeComposer {
+        @GraphNode(id = "node1")
+        final NodeAction nodeA = (state) -> Map.of();
+
+        @GraphNode(id = "node1")
+        final NodeAction nodeB = (state) -> Map.of();
+    }
+
+    @Test
+    @DisplayName("Should throw exception for duplicated Conditional Edge definitions")
+    void throwExceptionDuplicatedConditionalEdges() {
+        DuplicatedConditionEdgeGraphComposer composer = new DuplicatedConditionEdgeGraphComposer();
+        assertThatThrownBy(() -> builder.compile(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("already exist");
+    }
+
+    @GraphComposer
+    static class  DuplicatedConditionEdgeGraphComposer {
+        @ConditionalEdge(source = StateGraph.START, mappings = {"toEnd", StateGraph.END})
+        final EdgeAction edge1 = (state) -> StateGraph.END;
+
+        @ConditionalEdge(source = StateGraph.START, mappings = {"toEnd", StateGraph.END})
+        final EdgeAction edge2 = (state) -> StateGraph.END;
+    }
+
 }
