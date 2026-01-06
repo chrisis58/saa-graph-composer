@@ -18,7 +18,7 @@ public interface GraphCompiler {
      * @param graphComposer 包含 @GraphComposer 注解的对象实例
      * @return 编译后的可执行图
      */
-    CompiledGraph build(Object graphComposer);
+    CompiledGraph compile(Object graphComposer);
 }
 
 ```
