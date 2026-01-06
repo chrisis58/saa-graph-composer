@@ -4,7 +4,8 @@ package cn.teacy.ai;
 import cn.teacy.ai.annotation.GraphComposer;
 import cn.teacy.ai.annotation.GraphKey;
 import cn.teacy.ai.annotation.GraphNode;
-import cn.teacy.ai.core.ReflectiveGraphBuilder;
+import cn.teacy.ai.core.ReflectiveGraphCompiler;
+import cn.teacy.ai.exception.GraphDefinitionException;
 import cn.teacy.ai.interfaces.GraphBuildLifecycle;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.OverAllState;
@@ -18,21 +19,22 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 public class GraphBuildLifeCycleTest {
 
-    private ReflectiveGraphBuilder builder;
+    private ReflectiveGraphCompiler builder;
 
     @BeforeEach
     void setUp() {
-        builder = new ReflectiveGraphBuilder();
+        builder = new ReflectiveGraphCompiler();
     }
 
     @DisplayName("Manual Build: Pure Lifecycle Implementation")
     @Test
     void manualBuildByGraphBuildLifecycle() {
-        CompiledGraph compiledGraph = builder.build(new ManualGraphComposer());
+        CompiledGraph compiledGraph = builder.compile(new ManualGraphComposer());
 
         OverAllState state = compiledGraph.invoke(Map.of()).orElseThrow();
 
@@ -71,7 +73,7 @@ public class GraphBuildLifeCycleTest {
     @Test
     void hybridBuildTest() {
         HybridGraphComposer composer = new HybridGraphComposer();
-        CompiledGraph compiledGraph = builder.build(composer);
+        CompiledGraph compiledGraph = builder.compile(composer);
 
         OverAllState state = compiledGraph.invoke(Map.of("input", "test")).orElseThrow();
 
@@ -86,7 +88,7 @@ public class GraphBuildLifeCycleTest {
 
         public static final String NODE_A = "nodeA";
 
-        @GraphNode(id = NODE_A) // absent isStart and next
+        @GraphNode(id = NODE_A, next = "") // absent isStart and next
         final AsyncNodeActionWithConfig actionA = (state, config) -> {
             String input = (String) state.value("input").orElse("");
             return CompletableFuture.completedFuture(Map.of("result", input + "-processed"));
@@ -96,6 +98,54 @@ public class GraphBuildLifeCycleTest {
         public void beforeCompile(StateGraph builder) throws GraphStateException {
             builder.addEdge(StateGraph.START, NODE_A);
             builder.addEdge(NODE_A, StateGraph.END);
+        }
+    }
+
+    @Test
+    @DisplayName("Duplicate Edge define in beforeCompile should throw Exception")
+    void duplicatedEdgeTest() {
+        DuplicatedEdgeGraphComposer composer = new DuplicatedEdgeGraphComposer();
+        assertThatThrownBy(() -> builder.compile(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("duplicate");
+    }
+
+    @GraphComposer
+    static class DuplicatedEdgeGraphComposer implements GraphBuildLifecycle {
+
+        public static final String NODE_A = "nodeA";
+
+        @GraphNode(id = NODE_A, isStart = true, next = StateGraph.END)
+        final AsyncNodeActionWithConfig actionA = (state, config) ->
+                CompletableFuture.completedFuture(Map.of());
+
+        @Override
+        public void beforeCompile(StateGraph builder) throws GraphStateException {
+            builder.addEdge(StateGraph.START, NODE_A); // duplicated edge
+        }
+    }
+
+    @Test
+    @DisplayName("Duplicate Edge define in afterKeyRegistration should throw Exception")
+    void duplicatedEdgeAfterKeyRegistrationTest() {
+        DuplicatedEdgeAddAfterKeyRegistrationGraphComposer composer = new DuplicatedEdgeAddAfterKeyRegistrationGraphComposer();
+        assertThatThrownBy(() -> builder.compile(composer))
+                .isInstanceOf(GraphDefinitionException.class)
+                .hasMessageContaining("duplicate");
+    }
+
+    @GraphComposer
+    static class DuplicatedEdgeAddAfterKeyRegistrationGraphComposer implements GraphBuildLifecycle {
+
+        public static final String NODE_A = "nodeA";
+
+        @GraphNode(id = NODE_A, isStart = true, next = StateGraph.END)
+        final AsyncNodeActionWithConfig actionA = (state, config) ->
+                CompletableFuture.completedFuture(Map.of());
+
+        @Override
+        public void afterKeyRegistration(StateGraph builder) throws GraphStateException {
+            builder.addEdge(StateGraph.START, NODE_A); // duplicated edge
         }
     }
 

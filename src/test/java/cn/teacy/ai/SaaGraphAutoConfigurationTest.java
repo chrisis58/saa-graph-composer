@@ -1,7 +1,8 @@
 package cn.teacy.ai;
 
 import cn.teacy.ai.config.SaaGraphComposerAutoConfiguration;
-import cn.teacy.ai.core.IGraphBuilder;
+import cn.teacy.ai.core.GraphCompiler;
+import cn.teacy.ai.tests.another.AnotherTestGraphConfig;
 import cn.teacy.ai.tests.scoped.TestGraphConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +26,7 @@ public class SaaGraphAutoConfigurationTest {
     @DisplayName("Auto Configuration should work with default settings")
     void testDefaultConfiguration() {
         runner.run(context -> {
-            assertThat(context).hasSingleBean(IGraphBuilder.class);
+            assertThat(context).hasSingleBean(GraphCompiler.class);
         });
     }
 
@@ -34,7 +35,7 @@ public class SaaGraphAutoConfigurationTest {
     void testDisabledConfiguration() {
         runner.withPropertyValues("spring.ai.graph-composer.enabled=false")
                 .run(context -> {
-                    assertThat(context).doesNotHaveBean(IGraphBuilder.class);
+                    assertThat(context).doesNotHaveBean(GraphCompiler.class);
                 });
     }
 
@@ -43,23 +44,23 @@ public class SaaGraphAutoConfigurationTest {
     void testUserOverride() {
         runner.withUserConfiguration(UserConfig.class)
                 .run(context -> {
-                    assertThat(context).hasSingleBean(IGraphBuilder.class);
-                    assertThat(context.getBean(IGraphBuilder.class))
-                            .isInstanceOf(CustomGraphBuilder.class);
+                    assertThat(context).hasSingleBean(GraphCompiler.class);
+                    assertThat(context.getBean(GraphCompiler.class))
+                            .isInstanceOf(CustomGraphCompiler.class);
                 });
     }
 
     @Configuration
     static class UserConfig {
         @Bean
-        public IGraphBuilder graphBuilder() {
-            return new CustomGraphBuilder();
+        public GraphCompiler graphBuilder() {
+            return new CustomGraphCompiler();
         }
     }
 
-    static class CustomGraphBuilder implements IGraphBuilder {
+    static class CustomGraphCompiler implements GraphCompiler {
         @Override
-        public CompiledGraph build(Object graphComposer) {
+        public CompiledGraph compile(Object graphComposer) {
             return null;
         }
     }
@@ -74,6 +75,20 @@ public class SaaGraphAutoConfigurationTest {
                     assertThat(context).hasSingleBean(CompiledGraph.class);
 
                     CompiledGraph graph = context.getBean(CompiledGraph.class);
+                    assertThat(graph).isNotNull();
+
+                    assertThat(graph.invoke(Map.of()).isPresent()).isTrue();
+                });
+    }
+
+    @Test
+    void testAutoRegistrationWithComposerInAnotherPackage() {
+        runner.withUserConfiguration(AnotherTestGraphConfig.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(CompiledGraph.class);
+
+                    CompiledGraph graph = context.getBean(CompiledGraph.class);
+                    assertThat(context).hasBean("otherWorkflowCompiled");
                     assertThat(graph).isNotNull();
 
                     assertThat(graph.invoke(Map.of()).isPresent()).isTrue();

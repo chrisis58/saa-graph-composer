@@ -13,6 +13,7 @@ import java.lang.annotation.Target;
  *     <li>{@link com.alibaba.cloud.ai.graph.action.EdgeAction}</li>
  *     <li>{@link com.alibaba.cloud.ai.graph.action.AsyncEdgeAction}</li>
  *     <li>{@link com.alibaba.cloud.ai.graph.action.CommandAction}</li>
+ *     <li>{@link com.alibaba.cloud.ai.graph.action.AsyncCommandAction}</li>
  * </ul>
  */
 @Target(ElementType.FIELD)

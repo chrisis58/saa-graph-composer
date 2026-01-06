@@ -6,10 +6,18 @@
 
 ## 接口定义
 
-实现该接口的 `@GraphComposer` 类将在扫描解析完成后、编译生成 `CompiledGraph` 之前，自动触发 `beforeCompile` 方法。
+实现该接口的 `@GraphComposer` 类将获得介入图构建流程的能力。框架提供了两个关键的生命周期钩子，允许在自动化编排的不同阶段注入自定义逻辑。
 
 ```java
 public interface GraphBuildLifecycle {
+    /**
+     * 在所有的键注册完成后触发，即 new StateGraph() 之后，但在任何节点或连线添加之前。
+     * 
+     * @param builder 底层图构建器
+     * @throws GraphStateException 如果构建逻辑有误
+     */
+    default void afterKeyRegistration(StateGraph builder) throws GraphStateException {}
+
     /**
      * 在编译前触发，暴露底层的 StateGraph 构建器。
      * 你可以在此方法中补充节点、添加连线或进行校验。
@@ -17,7 +25,7 @@ public interface GraphBuildLifecycle {
      * @param builder 底层图构建器
      * @throws GraphStateException 如果构建逻辑有误
      */
-    void beforeCompile(StateGraph builder) throws GraphStateException;
+    default void beforeCompile(StateGraph builder) throws GraphStateException {}
 }
 
 ```
