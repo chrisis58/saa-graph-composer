@@ -19,9 +19,21 @@ SAA Graph Composer 是 Spring AI Alibaba Graph 的声明式编排扩展，将复
 1. **声明式开发**：通过注解直观定义节点职责与流转路径，而无需在代码中堆砌 `addNode()` 和 `addEdge()`。
 2. **Spring 深度集成**：遵循 Spring 标准开发模式。图定义类与编译后的图实例均被托管为标准 Bean，支持原生依赖注入与配置。
 3. **灵活的混合构建**：针对复杂的动态连线，可通过生命周期钩子访问底层 API 补全逻辑，实现静态定义与动态构建的结合。
-4. **多样的编译方式**：既支持通过 `@EnableGraphComposer` 自动扫描注册，也支持在不启动 Spring 上下文的情况下利用 `IGraphBuilder` 手动构建。
+4. **多样的编译方式**：既支持通过 `@EnableGraphComposer` 自动扫描注册，也支持在不启动 Spring 上下文的情况下利用 `GraphCompiler` 手动构建。
 
-通过 `@GraphComposer` 定义蓝图，告别繁琐的手动构建：
+## 快速开始
+
+引入依赖，并在启动类上标注 `@EnableGraphComposer`:
+
+```xml
+<dependency>
+    <groupId>cn.teacy.ai</groupId>
+    <artifactId>saa-graph-composer</artifactId>
+    <version>0.2.0</version>
+</dependency>
+```
+
+通过 `@GraphComposer` 定义蓝图，框架会自动扫描并注册 `CompiledGraph` Bean：
 
 ```java
 @GraphComposer
@@ -36,21 +48,31 @@ public class HelloGraphComposer {
 }
 ```
 
-对应生成的拓扑结构：
+完全等效的原生代码：
 
-```mermaid
-flowchart LR
-    start((START))
-    hello[Hello]
-    _end((END))
-    
-    start --> hello
-    hello --> _end
+```java
+@Bean
+public CompiledGraph helloGraph() {
+    StateGraph builder = new StateGraph(() -> {
+        Map<String, KeyStrategy> map = new HashMap<>();
+        initialState.put("greeting", new ReplaceStrategy());
+        return map;
+    });
+
+    NodeAction helloAction = state ->
+            Map.of("greeting", "Hello, Spring AI Alibaba!");
+
+    builder.addNode("hello", AsyncNodeAction.node_async(helloAction))
+            .addEdge(StateGraph.START, "hello")
+            .addEdge("hello", StateGraph.END);
+
+    return builder.compile();
+}
 ```
 
 ## 🤝 与 Spring AI Alibaba 的关系
 
-SAA Graph Composer **不是** 替代品，而是 **增强包**。
+SAA Graph Composer **不是** 替代品，而是 **扩展包**。
 
 - 它的底层完全基于 Spring AI Alibaba 的 `StateGraph` 构建。
 - 生成的 `CompiledGraph` 是原生的对象，你可以无缝使用原生的所有功能（如 `invoke`, `stream`）。
