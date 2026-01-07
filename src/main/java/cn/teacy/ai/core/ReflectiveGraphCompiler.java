@@ -183,7 +183,6 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
             if (field.isAnnotationPresent(ConditionalEdge.class)) {
                 ReflectionUtils.makeAccessible(field);
                 ConditionalEdge anno = field.getAnnotation(ConditionalEdge.class);
-                assert anno != null;
 
                 Map<String, String> routeMap = parseMappings(anno.mappings(), field.getName());
                 String sourceNodeId = anno.source();
