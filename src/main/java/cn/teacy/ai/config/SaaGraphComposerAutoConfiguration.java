@@ -18,7 +18,7 @@ public class SaaGraphComposerAutoConfiguration {
 
     @Bean(GRAPH_COMPILER_BEAN_NAME)
     @ConditionalOnMissingBean(name = GRAPH_COMPILER_BEAN_NAME)
-    public GraphCompiler graphBuilder() {
+    public GraphCompiler graphCompiler() {
         return new ReflectiveGraphCompiler();
     }
 

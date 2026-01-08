@@ -54,7 +54,7 @@ public class SaaGraphAutoConfigurationTest {
     @Configuration
     static class UserConfig {
         @Bean(ComposerConfigConstants.GRAPH_COMPILER_BEAN_NAME)
-        public GraphCompiler graphBuilder() {
+        public GraphCompiler graphCompiler() {
             return new CustomGraphCompiler();
         }
     }
