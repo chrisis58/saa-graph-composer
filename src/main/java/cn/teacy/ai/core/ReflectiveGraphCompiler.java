@@ -6,26 +6,37 @@ import cn.teacy.ai.interfaces.GraphBuildLifecycle;
 import com.alibaba.cloud.ai.graph.*;
 import com.alibaba.cloud.ai.graph.action.*;
 import com.alibaba.cloud.ai.graph.exception.GraphStateException;
-import org.jetbrains.annotations.NotNull;
+import jakarta.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
-import org.springframework.stereotype.Component;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-@Component
 public class ReflectiveGraphCompiler implements GraphCompiler {
 
     private static final Logger log = LoggerFactory.getLogger(ReflectiveGraphCompiler.class);
 
-    public CompiledGraph compile(Object graphComposer) {
+    protected record CompileContext(
+            Object composerInstance,
+            @Nonnull Map<String, KeyStrategy> keyStrategies,
+            @Nonnull List<GraphOperation> operations,
+            @Nonnull AtomicReference<CompileConfig> configRef
+    ) {}
+
+    @FunctionalInterface
+    protected interface GraphOperation {
+        void execute(StateGraph builder) throws GraphStateException;
+    }
+
+    public final CompiledGraph compile(Object graphComposer) {
         Class<?> clazz = graphComposer.getClass();
         GraphComposer composerAnno = clazz.getAnnotation(GraphComposer.class);
 
@@ -38,38 +49,27 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
                 : clazz.getSimpleName();
 
         try {
-            Map<String, KeyStrategy> keyStrategies = scanKeys(clazz, graphComposer);
+            CompileContext context = collectCompileContextFromComposer(graphComposer);
 
-            StateGraph builder = new StateGraph(graphId, () -> keyStrategies);
+            StateGraph builder = new StateGraph(graphId, () -> context.keyStrategies);
 
             if (graphComposer instanceof GraphBuildLifecycle lifecycleHook) {
                 lifecycleHook.afterKeyRegistration(builder);
             }
 
-            Map<String, List<String>> linearEdges = scanNodes(graphComposer, builder);
-
-            linearEdges.forEach((from, tos) -> {
-                for (String to : tos) {
-                    try {
-                        log.debug("Adding Edge: {} -> {}", from, to);
-                        builder.addEdge(from, to);
-                    } catch (GraphStateException e) {
-                        throw new GraphDefinitionException(
-                                String.format("Invalid Edge in [%s]: Cannot connect '%s' -> '%s'. Cause: %s",
-                                        graphId, from, to, e.getMessage()), e);
-                    }
-                }
-            });
-
-            scanConditionalEdges(graphComposer, builder, graphId);
+            for (GraphOperation modification : context.operations) {
+                modification.execute(builder);
+            }
 
             if (graphComposer instanceof GraphBuildLifecycle lifecycleHook) {
                 lifecycleHook.beforeCompile(builder);
             }
 
-            CompileConfig compileConfig = scanCompileConfig(graphComposer);
+            CompileConfig compileConfig = context.configRef.get();
 
-            return builder.compile(compileConfig);
+            return compileConfig == null
+                    ? builder.compile()
+                    : builder.compile(compileConfig);
 
         } catch (GraphStateException e) {
             throw new GraphDefinitionException(
@@ -82,135 +82,125 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
         }
     }
 
-    private Map<String, KeyStrategy> scanKeys(Class<?> clazz, Object composer) {
-        Map<String, KeyStrategy> strategyMap = new HashMap<>();
+    private CompileContext collectCompileContextFromComposer(Object composer) {
+        Class<?> clazz = composer.getClass();
+
+        CompileContext context = new CompileContext(
+                composer,
+                new HashMap<>(),
+                new ArrayList<>(),
+                new AtomicReference<>()
+        );
 
         ReflectionUtils.doWithFields(clazz, field -> {
             if (field.isAnnotationPresent(GraphKey.class)) {
-                ReflectionUtils.makeAccessible(field);
-                GraphKey anno = field.getAnnotation(GraphKey.class);
-
-                if (!Modifier.isFinal(field.getModifiers())) {
-                    throw new GraphDefinitionException(
-                            String.format("Field '%s' must be 'final'. Graph keys should be immutable constants.", field.getName()));
-                }
-
-                if (!Modifier.isStatic(field.getModifiers())) {
-                    throw new GraphDefinitionException(
-                            String.format("Field '%s' must be 'static'. Graph keys supposed to be global constants (e.g., public static final String).", field.getName()));
-                }
-
-                if (field.getType() != String.class) {
-                    throw new GraphDefinitionException("Field type must be String.");
-                }
-
-                ReflectionUtils.makeAccessible(field);
-                String keyName = (String) field.get(null);
-
-                KeyStrategy strategy = BeanUtils.instantiateClass(anno.strategy());
-
-                if (strategyMap.containsKey(keyName)) {
-                    throw new GraphDefinitionException("Duplicate Graph Key detected: " + keyName +
-                            ". Defined in field: " + field.getName());
-                }
-                strategyMap.put(keyName, strategy);
+                handleGraphKey(context, field, field.getAnnotation(GraphKey.class));
+            } else if (field.isAnnotationPresent(GraphNode.class)) {
+                handleGraphNode(context, field, field.getAnnotation(GraphNode.class));
+            } else if (field.isAnnotationPresent(ConditionalEdge.class)) {
+                handleConditionalEdge(context, field, field.getAnnotation(ConditionalEdge.class));
+            } else if (field.isAnnotationPresent(GraphCompileConfig.class)) {
+                handleCompileConfig(context, field, field.getAnnotation(GraphCompileConfig.class));
+            } else {
+                handleOtherField(context, field);
             }
         });
 
-        return strategyMap;
+        return context;
+
     }
 
-    private Map<String, List<String>> scanNodes(Object composer, StateGraph builder) {
-        Map<String, List<String>> edges = new HashMap<>();
+    protected void handleGraphKey(CompileContext context, Field field, GraphKey annotation) {
+        if (!Modifier.isFinal(field.getModifiers())) {
+            throw new GraphDefinitionException(
+                    String.format("Field '%s' must be 'final'. Graph keys should be immutable constants.", field.getName()));
+        }
 
-        ReflectionUtils.doWithFields(composer.getClass(), field -> {
-            if (field.isAnnotationPresent(GraphNode.class)) {
-                ReflectionUtils.makeAccessible(field);
-                GraphNode anno = field.getAnnotation(GraphNode.class);
+        if (!Modifier.isStatic(field.getModifiers())) {
+            throw new GraphDefinitionException(
+                    String.format("Field '%s' must be 'static'. Graph keys supposed to be global constants (e.g., public static final String).", field.getName()));
+        }
 
-                String nodeId = StringUtils.hasText(anno.id()) ? anno.id() : field.getName();
+        if (field.getType() != String.class) {
+            throw new GraphDefinitionException("Field type must be String.");
+        }
 
-                try {
-                    Object nodeInstance = field.get(composer);
-                    if (nodeInstance == null) {
-                        throw new IllegalStateException("GraphNode field '" + field.getName() + "' is null. Please initialize it.");
-                    }
+        ReflectionUtils.makeAccessible(field);
+        String keyName = (String) ReflectionUtils.getField(field, null);
 
-                    if (nodeInstance instanceof AsyncNodeActionWithConfig action) {
-                        builder.addNode(nodeId, action);
-                    } else if (nodeInstance instanceof AsyncNodeAction action) {
-                        builder.addNode(nodeId, action);
-                    } else if (nodeInstance instanceof NodeActionWithConfig action) {
-                        builder.addNode(nodeId, AsyncNodeActionWithConfig.node_async(action));
-                    } else if (nodeInstance instanceof NodeAction action) {
-                        builder.addNode(nodeId, AsyncNodeAction.node_async(action));
-                    } else if (nodeInstance instanceof CompiledGraph subGraph) {
-                        builder.addNode(nodeId, subGraph);
-                    } else {
-                        String supportedTypes = Set.of(
-                                NodeAction.class,
-                                AsyncNodeAction.class,
-                                NodeActionWithConfig.class,
-                                AsyncNodeActionWithConfig.class,
-                                CompiledGraph.class
-                        ).stream().map(Class::getSimpleName).collect(Collectors.joining(" or "));
-                        throw new IllegalArgumentException("Field '" + field.getName() + "' annotated with @GraphNode must be instance of " + supportedTypes + ". ");
-                    }
+        KeyStrategy strategy = BeanUtils.instantiateClass(annotation.strategy());
 
-                    if (anno.isStart()) {
-                        edges.computeIfAbsent(StateGraph.START, k -> new ArrayList<>())
-                                .add(nodeId);
-                    }
+        if (context.keyStrategies.containsKey(keyName)) {
+            throw new GraphDefinitionException("Duplicate Graph Key detected: " + keyName +
+                    ". Defined in field: " + field.getName());
+        }
+        context.keyStrategies.put(keyName, strategy);
+    }
 
-                    for (String next : anno.next()) {
-                        if (StringUtils.hasText(next)) {
-                            edges.computeIfAbsent(nodeId, k -> new ArrayList<>())
-                                    .add(next);
-                        }
-                    }
+    protected void handleGraphNode(CompileContext context, Field field, GraphNode annotation) {
+        String nodeId = StringUtils.hasText(annotation.id()) ? annotation.id() : field.getName();
 
-                } catch (GraphStateException e) {
-                    throw new GraphDefinitionException(
-                            String.format("Failed to add node '%s'. Cause: %s", nodeId, e.getMessage()), e);
-                }
+        ReflectionUtils.makeAccessible(field);
+        Object nodeInstance = ReflectionUtils.getField(field, context.composerInstance);
+
+        if (nodeInstance == null) {
+            throw new IllegalStateException("GraphNode field '" + field.getName() + "' is null. Please initialize it.");
+        }
+
+        if (nodeInstance instanceof AsyncNodeActionWithConfig action) {
+            context.operations.add(builder -> builder.addNode(nodeId, action));
+        } else if (nodeInstance instanceof AsyncNodeAction action) {
+            context.operations.add(builder -> builder.addNode(nodeId, action));
+        } else if (nodeInstance instanceof NodeActionWithConfig action) {
+            context.operations.add(builder -> builder.addNode(nodeId, AsyncNodeActionWithConfig.node_async(action)));
+        } else if (nodeInstance instanceof NodeAction action) {
+            context.operations.add(builder -> builder.addNode(nodeId, AsyncNodeAction.node_async(action)));
+        } else if (nodeInstance instanceof CompiledGraph subGraph) {
+            context.operations.add(builder -> builder.addNode(nodeId, subGraph));
+        } else {
+            String supportedTypes = Set.of(
+                    NodeAction.class,
+                    AsyncNodeAction.class,
+                    NodeActionWithConfig.class,
+                    AsyncNodeActionWithConfig.class,
+                    CompiledGraph.class
+            ).stream().map(Class::getSimpleName).collect(Collectors.joining(" or "));
+            throw new IllegalArgumentException("Field '" + field.getName() + "' annotated with @GraphNode must be instance of " + supportedTypes + ". ");
+        }
+
+        if (annotation.isStart()) {
+            context.operations.add(builder -> builder.addEdge(StateGraph.START, nodeId));
+        }
+
+        for (String next : annotation.next()) {
+            if (!StringUtils.hasText(next)) {
+                continue;
             }
-        });
-        return edges;
+            context.operations.add(builder -> builder.addEdge(nodeId, next));
+        }
+
     }
 
-    private void scanConditionalEdges(Object composer, StateGraph builder, String graphId) {
-        ReflectionUtils.doWithFields(composer.getClass(), field -> {
-            if (field.isAnnotationPresent(ConditionalEdge.class)) {
-                ReflectionUtils.makeAccessible(field);
-                ConditionalEdge anno = field.getAnnotation(ConditionalEdge.class);
+    protected void handleConditionalEdge(CompileContext context, Field field, ConditionalEdge annotation) {
+        Map<String, String> routeMap = parseMappings(annotation.mappings(), field.getName());
+        String sourceNodeId = annotation.source();
 
-                Map<String, String> routeMap = parseMappings(anno.mappings(), field.getName());
-                String sourceNodeId = anno.source();
+        ReflectionUtils.makeAccessible(field);
+        Object fieldVal = ReflectionUtils.getField(field, context.composerInstance);
 
-                try {
-                    Object fieldVal = field.get(composer);
+        if (fieldVal == null) {
+            throw new GraphDefinitionException("Conditional Edge field '"
+                    + field.getName()
+                    + "' is null. Please initialize it with a lambda expression or instance.");
+        }
 
-                    if (fieldVal == null) {
-                        throw new GraphDefinitionException(String.format(
-                                "Conditional Edge field '%s' in graph [%s] is null. Please initialize it with a lambda expression or instance.",
-                                field.getName(), graphId));
-                    }
+        AsyncCommandAction unifiedAction = getUnifiedAction(fieldVal, field.getName());
 
-                    AsyncCommandAction unifiedAction = getUnifiedAction(fieldVal, field.getName());
-
-                    builder.addConditionalEdges(sourceNodeId, unifiedAction, routeMap);
-                } catch (GraphStateException e) {
-                    throw new GraphDefinitionException(
-                            String.format("Failed to add conditional edges from node '%s' in graph '%s'. Cause: %s",
-                                    sourceNodeId, graphId, e.getMessage()), e);
-                }
-
-            }
-        });
+        context.operations.add(builder -> builder.addConditionalEdges(sourceNodeId, unifiedAction, routeMap));
     }
 
-    @NotNull
-    private static AsyncCommandAction getUnifiedAction(Object fieldVal, String fieldName) {
+    @Nonnull
+    protected static AsyncCommandAction getUnifiedAction(Object fieldVal, String fieldName) {
         if (fieldVal instanceof AsyncCommandAction action) {
             return action;
         }
@@ -231,40 +221,31 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
                 fieldName, fieldVal.getClass().getSimpleName()));
     }
 
-    private CompileConfig scanCompileConfig(Object composer) {
+    protected void handleCompileConfig(CompileContext context, Field field, GraphCompileConfig annotation) {
+        if (context.configRef.get() != null) {
+            throw new IllegalStateException("Multiple @GraphCompileConfig fields found in " + context.composerInstance.getClass().getSimpleName());
+        }
 
-        AtomicReference<CompileConfig> configRef = new AtomicReference<>();
+        ReflectionUtils.makeAccessible(field);
+        Object value = ReflectionUtils.getField(field, context.composerInstance);
 
-        ReflectionUtils.doWithFields(composer.getClass(), field -> {
-            if (field.isAnnotationPresent(GraphCompileConfig.class)) {
-                if (configRef.get() != null) {
-                    throw new IllegalStateException("Multiple @GraphCompileConfig fields found in " + composer.getClass().getSimpleName());
-                }
+        if (value == null) {
+            throw new GraphDefinitionException("@GraphCompileConfig field '" + field.getName() + "' must not be null.");
+        }
 
-                ReflectionUtils.makeAccessible(field);
-
-                Object value = field.get(composer);
-                if (value == null) {
-                    throw new GraphDefinitionException("@GraphCompileConfig field '" + field.getName() + "' must not be null.");
-                }
-
-                if (value instanceof CompileConfig) {
-                    configRef.set((CompileConfig) value);
-                } else if (value instanceof Supplier) {
-                    Object suppliedValue = ((Supplier<?>) value).get();
-                    if (suppliedValue instanceof CompileConfig) {
-                        configRef.set((CompileConfig) suppliedValue);
-                    } else {
-                        throw new GraphDefinitionException("The Supplier in field '" + field.getName() + "' returned null or an invalid type.");
-                    }
-                } else {
-                    throw new GraphDefinitionException("Field '" + field.getName() + "' must be of type CompileConfig or Supplier<CompileConfig>.");
-                }
-
+        if (value instanceof CompileConfig) {
+            context.configRef.set((CompileConfig) value);
+        } else if (value instanceof Supplier) {
+            Object suppliedValue = ((Supplier<?>) value).get();
+            if (suppliedValue instanceof CompileConfig) {
+                context.configRef.set((CompileConfig) suppliedValue);
+            } else {
+                throw new GraphDefinitionException("The Supplier in field '" + field.getName() + "' returned null or an invalid type.");
             }
-        });
+        } else {
+            throw new GraphDefinitionException("Field '" + field.getName() + "' must be of type CompileConfig or Supplier<CompileConfig>.");
+        }
 
-        return Optional.ofNullable(configRef.get()).orElseGet(() -> CompileConfig.builder().build());
     }
 
     private Map<String, String> parseMappings(String[] mappings, String fieldName) {
@@ -277,4 +258,10 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
         }
         return map;
     }
+
+    /** Placeholder for handling other field types in the future. */
+    protected void handleOtherField(CompileContext context, Field field) {
+        log.debug("Field '{}' is not annotated with recognized graph annotations.", field.getName());
+    }
+
 }
