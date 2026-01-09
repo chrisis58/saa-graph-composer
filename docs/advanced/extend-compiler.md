@@ -29,12 +29,31 @@
 子类通过 `CompileContext` 记录来与编译流程交互，它是扩展逻辑的核心载体。
 
 ```java
-protected record CompileContext(
-        Object composerInstance,                  // 当前正在编译的 Composer 对象实例
-        Map<String, KeyStrategy> keyStrategies,   // 已注册的 Key 策略
-        List<GraphOperation> operations,          // 待执行的构建操作列表
-        AtomicReference<CompileConfig> configRef  // 编译配置引用
-) {}
+protected static class CompileContext {
+
+    /** 获取当前正在编译的 Composer 对象实例 */
+    public Object composerInstance() { ... }
+
+    /** 检查是否已设置编译配置 */
+    public boolean hasCompileConfig() { ... }
+
+    /** 设置编译配置 */
+    public void setCompileConfig(CompileConfig config) { ... }
+    
+    /** 检查 key 是否已经存在 */
+    public boolean containsKey(String key) { ... }
+
+    /** 注册 Key 策略 */
+    public void addKeyStrategy(String key, KeyStrategy strategy, String fieldName) { ... }
+
+    /**
+     * 注册图构建操作
+     * @param op          操作逻辑 (Lambda)
+     * @param errorFormat 错误描述模板 (例如 "add node '%s' (field: %s)")
+     * @param args        错误描述参数
+     */
+    public void registerOperation(GraphOperation op, String errorFormat, Object... args) { ... }
+}
 
 @FunctionalInterface
 protected interface GraphOperation {
@@ -43,7 +62,9 @@ protected interface GraphOperation {
 
 ```
 
-> 扩展逻辑的主要任务是向 `context.operations` 列表中添加 `GraphOperation`。这些操作不会立即执行，而是在解析完所有字段后，在 `compile` 方法的最后阶段统一应用到 `StateGraph` 构建器上。
+::: info 关于 `GraphOperation`
+扩展逻辑的主要任务调用 `context#registerOperation` 来注册 `GraphOperation`。这些操作不会立即执行，而是在解析完图的定义后，在 `compile` 方法的最后阶段统一应用到 `StateGraph` 构建器上。
+:::
 
 ## 2. 示例一：支持批量节点注册
 
@@ -76,28 +97,30 @@ public class MyCustomCompiler extends ReflectiveGraphCompiler {
 
         // 2. 识别 GraphModule 接口
         if (instance instanceof GraphModule module) {
-            context.operations().add(builder -> {
+            context.registerOperation(builder -> {
                 Map<String, NodeAction> nodes = module.namedNodes();
                 if (nodes == null || nodes.isEmpty()) {
                     return;
                 }
 
-                // 3. 简单的批量注册逻辑：将 Map 中的所有节点加入构建器
+                // 3.1 批量注册模块内的所有节点
                 nodes.forEach((nodeId, action) -> {
-                    builder.addNode(nodeId, action);
+                    // 如果 action 类型复杂，可以使用 UnifyUtils 进行转换
+                    builder.addNode(nodeId, AsyncNodeAction.node_async(action));
                 });
 
-                // 4. 如果注解指定了 id，将其视为模块入口，自动连线 Start
+                // 3.2 处理模块入口连线
                 if (anno.isStart() && StringUtils.hasText(anno.id())) {
                     builder.addEdge(StateGraph.START, anno.id());
                 }
-            });
 
-            // 5. 处理完毕，阻断父类逻辑
+            }, "register GraphModule nodes from field '%s'", field.getName());
+
+            // 4. 处理完毕，阻断父类逻辑
             return;
         }
 
-        // 6. 非模块类型，务必回退给父类处理标准类型
+        // 5. 非模块类型，务必回退给父类处理标准类型
         super.handleGraphNode(context, field, anno);
     }
 }
@@ -105,7 +128,7 @@ public class MyCustomCompiler extends ReflectiveGraphCompiler {
 ```
 
 ::: tip 最佳实践
-为简化示例，这里直接向 `context.operations()` 添加操作。实际使用中，请使用 `ReflectiveGraphCompiler#registerOperation` 方法来注册操作来获取更好的异常处理以快速定位。
+`context#registerOperation` 方法是向编译上下文注册构建操作的推荐方式。它额外接收一个字符串模板以及参数，用于生成更具描述性的错误信息。
 :::
 
 ## 3. 示例二：支持自定义注解
@@ -167,16 +190,16 @@ public class MyFullFeatureCompiler extends ReflectiveGraphCompiler {
 
         // 3. 核心步骤：向 Context 添加操作指令
         // 这些指令会在 compile() 的最终阶段执行
-        context.operations().add(builder -> {
+        context.registerOperation(builder -> {
             builder.addEdge(sourceId, targetId);
-        });
+        }, "add custom edge from '%s' to '%s' (field: %s)", sourceId, targetId, field.getName());
     }
 }
 
 ```
 
 ::: tip 最佳实践
-为简化示例，这里直接向 `context.operations()` 添加操作。实际使用中，请使用 `ReflectiveGraphCompiler#registerOperation` 方法来注册操作来获取更好的异常处理以快速定位。
+`context#registerOperation` 方法是向编译上下文注册构建操作的推荐方式。它额外接收一个字符串模板以及参数，用于生成更具描述性的错误信息。
 :::
 
 ## 4. 综合使用示例
