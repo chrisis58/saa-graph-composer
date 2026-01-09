@@ -38,10 +38,11 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
             return composerInstance;
         }
 
-        public void addKeyStrategy(String key, KeyStrategy strategy, String fieldName) {
-            if (this.keyStrategies.containsKey(key)) {
-                throw new GraphDefinitionException("Duplicate Graph Key: " + key + ". Defined in field: " + fieldName);
-            }
+        public boolean containsKey(String key) {
+            return this.keyStrategies.containsKey(key);
+        }
+
+        public void addKeyStrategy(String key, KeyStrategy strategy) {
             this.keyStrategies.put(key, strategy);
         }
 
@@ -174,9 +175,13 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
         ReflectionUtils.makeAccessible(field);
         String keyName = (String) ReflectionUtils.getField(field, null);
 
+        if (context.containsKey(keyName)) {
+            throw new GraphDefinitionException("Duplicate Graph Key: " + keyName + ". Defined in field: " + field.getName());
+        }
+
         KeyStrategy strategy = BeanUtils.instantiateClass(annotation.strategy());
 
-        context.addKeyStrategy(keyName, strategy, field.getName());
+        context.addKeyStrategy(keyName, strategy);
     }
 
     protected void handleGraphNode(CompileContext context, Field field, GraphNode annotation) {
