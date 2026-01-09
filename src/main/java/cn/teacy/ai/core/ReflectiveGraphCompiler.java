@@ -19,7 +19,6 @@ import java.lang.reflect.Modifier;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 public class ReflectiveGraphCompiler implements GraphCompiler {
 
@@ -205,7 +204,7 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
                     "add ConditionalEdges from source node '%s' (field: %s)", sourceNodeId, fieldName);
         } catch (IllegalArgumentException e) {
             throw new GraphDefinitionException(String.format(
-                    "Field '%s' type [%s] for @ConditionEdge is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, CommandAction, AsyncCommandAction]",
+                    "Field '%s' type [%s] for @ConditionalEdge is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, CommandAction, AsyncCommandAction]",
                     fieldName, fieldVal.getClass().getSimpleName()), e);
         }
     }
