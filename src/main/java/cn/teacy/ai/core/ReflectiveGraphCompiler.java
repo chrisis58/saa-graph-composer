@@ -3,6 +3,7 @@ package cn.teacy.ai.core;
 import cn.teacy.ai.annotation.*;
 import cn.teacy.ai.exception.GraphDefinitionException;
 import cn.teacy.ai.interfaces.GraphBuildLifecycle;
+import cn.teacy.ai.utils.UnifyUtils;
 import com.alibaba.cloud.ai.graph.*;
 import com.alibaba.cloud.ai.graph.action.*;
 import com.alibaba.cloud.ai.graph.exception.GraphStateException;
@@ -150,30 +151,19 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
 
         String fieldName = field.getName();
 
-        if (nodeInstance instanceof AsyncNodeActionWithConfig action) {
-            registerOperation(context, b -> b.addNode(nodeId, action),
-                    "add AsyncNodeActionWithConfig node '%s' (field: %s)", nodeId, fieldName);
-        } else if (nodeInstance instanceof AsyncNodeAction action) {
-            registerOperation(context, b -> b.addNode(nodeId, action),
-                    "add AsyncNodeAction node '%s' (field: %s)", nodeId, fieldName);
-        } else if (nodeInstance instanceof NodeActionWithConfig action) {
-            registerOperation(context, b -> b.addNode(nodeId, AsyncNodeActionWithConfig.node_async(action)),
-                    "add NodeActionWithConfig node '%s' (field: %s)", nodeId, fieldName);
-        } else if (nodeInstance instanceof NodeAction action) {
-            registerOperation(context, b -> b.addNode(nodeId, AsyncNodeAction.node_async(action)),
-                    "add NodeAction node '%s' (field: %s)", nodeId, fieldName);
-        } else if (nodeInstance instanceof CompiledGraph subGraph) {
-            registerOperation(context, b -> b.addNode(nodeId, subGraph),
-                    "add SubGraph node '%s' (field: %s)", nodeId, fieldName);
-        } else {
-            String supportedTypes = Set.of(
-                    NodeAction.class,
-                    AsyncNodeAction.class,
-                    NodeActionWithConfig.class,
-                    AsyncNodeActionWithConfig.class,
-                    CompiledGraph.class
-            ).stream().map(Class::getSimpleName).collect(Collectors.joining(" or "));
-            throw new IllegalArgumentException("Field '" + field.getName() + "' annotated with @GraphNode must be instance of " + supportedTypes + ". ");
+        try {
+            if (nodeInstance instanceof CompiledGraph subGraph) {
+                registerOperation(context, b -> b.addNode(nodeId, subGraph),
+                        "add SubGraph node '%s' (field: %s)", nodeId, fieldName);
+            } else {
+                AsyncNodeActionWithConfig action = UnifyUtils.getUnifiedNodeAction(nodeInstance);
+                registerOperation(context, b -> b.addNode(nodeId, action),
+                        "add NodeAction node '%s' (field: %s)", nodeId, fieldName);
+            }
+        } catch (IllegalArgumentException e) {
+            throw new GraphDefinitionException(String.format(
+                    "Field '%s' type [%s] for @GraphNode is not supported. Must be one of: [CompiledGraph, NodeAction, AsyncNodeAction, NodeActionWithConfig, AsyncNodeActionWithConfig]",
+                    fieldName, nodeInstance.getClass().getSimpleName()), e);
         }
 
         if (annotation.isStart()) {
@@ -207,33 +197,17 @@ public class ReflectiveGraphCompiler implements GraphCompiler {
         }
 
         String fieldName = field.getName();
-        AsyncCommandAction unifiedAction = getUnifiedAction(fieldVal, fieldName);
+        try {
+            AsyncCommandAction unifiedAction = UnifyUtils.getUnifiedCommandAction(fieldVal);
 
-        registerOperation(context,
-                builder -> builder.addConditionalEdges(sourceNodeId, unifiedAction, routeMap),
-                "add ConditionalEdges from source node '%s' (field: %s)", sourceNodeId, fieldName);
-    }
-
-    @Nonnull
-    protected static AsyncCommandAction getUnifiedAction(Object fieldVal, String fieldName) {
-        if (fieldVal instanceof AsyncCommandAction action) {
-            return action;
+            registerOperation(context,
+                    builder -> builder.addConditionalEdges(sourceNodeId, unifiedAction, routeMap),
+                    "add ConditionalEdges from source node '%s' (field: %s)", sourceNodeId, fieldName);
+        } catch (IllegalArgumentException e) {
+            throw new GraphDefinitionException(String.format(
+                    "Field '%s' type [%s] for @ConditionEdge is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, CommandAction, AsyncCommandAction]",
+                    fieldName, fieldVal.getClass().getSimpleName()), e);
         }
-        if (fieldVal instanceof CommandAction action) {
-            return AsyncCommandAction.node_async(action);
-        }
-        if (fieldVal instanceof AsyncEdgeAction action) {
-            // wrap once
-            return AsyncCommandAction.of(action);
-        }
-        if (fieldVal instanceof EdgeAction action) {
-            // wrap twice
-            AsyncEdgeAction asyncWrapper = AsyncEdgeAction.edge_async(action);
-            return AsyncCommandAction.of(asyncWrapper);
-        }
-        throw new GraphDefinitionException(String.format(
-                "Field '%s' type [%s] is not supported. Must be one of: [EdgeAction, AsyncEdgeAction, CommandAction, AsyncCommandAction]",
-                fieldName, fieldVal.getClass().getSimpleName()));
     }
 
     protected void handleCompileConfig(CompileContext context, Field field, GraphCompileConfig annotation) {
